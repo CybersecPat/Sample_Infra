@@ -1,0 +1,61 @@
+#This playbook configures an Ubuntu 22.04 DESKTOP host with Cuckoo Sandbox. You will need to install the victim guest OS and point Cuckoo to it manually. 
+
+---
+- name: Setup Cuckoo Sandbox on Ubuntu 22.04
+  hosts: ubuntu_host
+  become: yes
+  tasks:
+
+    # Install required dependencies
+    - name: Install required packages
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-virtualenv
+          - virtualbox
+          - tcpdump
+          - apparmor-utils
+        state: present
+
+    # Disable AppArmor for tcpdump to allow Cuckoo to use it
+    - name: Disable AppArmor for tcpdump
+      command: aa-disable /usr/sbin/tcpdump
+
+    # Add current user to vboxusers group
+    - name: Add user to vboxusers
+      user:
+        name: "{{ ansible_user }}"
+        groups: vboxusers
+        append: yes
+
+    # Set up Python virtual environment for Cuckoo
+    - name: Create virtual environment for Cuckoo
+      command: python3 -m virtualenv /opt/cuckoo
+      args:
+        creates: /opt/cuckoo
+
+    # Install Cuckoo in the virtual environment
+    - name: Install Cuckoo
+      pip:
+        name: cuckoo
+        virtualenv: /opt/cuckoo
+        virtualenv_python: python3
+
+    # Initialize Cuckoo
+    - name: Initialize Cuckoo
+      command: /opt/cuckoo/bin/cuckoo init
+      become: no
+      become_user: "{{ ansible_user }}"
+      environment:
+        HOME: "/home/{{ ansible_user }}"
+
+    # Start Cuckoo
+    - name: Start Cuckoo
+      command: /opt/cuckoo/bin/cuckoo
+      become: no
+      become_user: "{{ ansible_user }}"
+      environment:
+        HOME: "/home/{{ ansible_user }}"
+      async: 10
+      poll: 0
