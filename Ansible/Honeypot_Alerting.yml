@@ -1,0 +1,51 @@
+#This playbook is configured to set up Cowrie in Docker on an Ubuntu host with automatic alerts for changes to the Cowrie log file. Changes to the Cowrie log file indicate that someone or something was trying to access the server. You will have to customize this to your specific environment.
+
+#To achieve this it takes the Cowrie log file from the docker container and saves it on the host. Then it compares that log file to the other most recent one to find any differences. Then the differences, (new logs) are sent to Slack via a webhook. You can also do this with Teams. 
+
+---
+- name: Setup Cron Jobs for Cowrie Log Management
+  hosts: target_host
+  become: yes
+  vars:
+    slack_webhook_url: "YOUR_SLACK_WEBHOOK_URL"
+  tasks:
+
+    # Create a cron job to manage Cowrie logs
+    - name: Create cron job for Cowrie logs
+      cron:
+        name: "Manage Cowrie logs"
+        minute: "0"
+        job: "/usr/local/bin/manage_cowrie_logs.sh"
+        user: "{{ ansible_user }}"
+      notify: Create Cowrie log management script
+
+    # Create a cron job to delete old logs
+    - name: Create cron job to delete old logs
+      cron:
+        name: "Delete old logs"
+        minute: "0"
+        hour: "0"
+        job: "find /honeypot/logs/ -type d -mtime +7 -exec rm -rf {} +"
+        user: "{{ ansible_user }}"
+
+  handlers:
+    - name: Create Cowrie log management script
+      copy:
+        dest: "/usr/local/bin/manage_cowrie_logs.sh"
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          TODAY=$(date +"%Y-%m-%d")
+          TIME=$(date +"%H:%M:%S")
+          LOG_DIR="/honeypot/logs/$TODAY"
+          mkdir -p "$LOG_DIR"
+          docker cp cowrie:/path/to/cowrie/log "$LOG_DIR/$TIME"
+          chown -R {{ ansible_user }}:{{ ansible_user }} "$LOG_DIR/$TIME"
+          LATEST_LOG="$LOG_DIR/$TIME"
+          PREVIOUS_LOG=$(ls -t "$LOG_DIR" | head -2 | tail -1)
+          if [ -f "$PREVIOUS_LOG" ]; then
+            comm -13 <(sort "$PREVIOUS_LOG") <(sort "$LATEST_LOG") > "$LOG_DIR/logs.txt"
+            if [ -s "$LOG_DIR/logs.txt" ]; then
+              curl -X POST -H 'Content-type: application/json' --data '{"text":"'"$(cat "$LOG_DIR/logs.txt")"'"}' {{ slack_webhook_url }}
+            fi
+          fi

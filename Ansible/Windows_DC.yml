@@ -1,0 +1,64 @@
+#This playbook does the following:
+#1. Create a non admin user on the Windows server
+#2. Set a static IP on the server
+#3. Install the AD Domain Controller role
+#4. Install the DNS services required for DC functionality
+#5. Create a new Domain
+#6. Reboot if domain creation requires it
+#7. Create 3 new users on the domain
+
+---
+- name: Configure Windows Host
+  hosts: windows
+  gather_facts: no
+  tasks:
+    - name: Add a non-administrator user
+      win_user:
+        name: nonadminuser
+        password: SecureP@ssw0rd
+        groups:
+          - Users
+        state: present
+
+    - name: Set a static IP
+      win_ip:
+        adapter_name: 'Ethernet'
+        address: '192.168.1.10'
+        netmask: '255.255.255.0'
+        gateway: '192.168.1.1'
+        dns_servers:
+          - '192.168.1.10'
+
+    - name: Install AD Domain Services role
+      win_feature:
+        name: AD-Domain-Services
+        state: present
+
+    - name: Install DNS role
+      win_feature:
+        name: DNS
+        state: present
+
+    - name: Create a new domain
+      win_domain:
+        dns_domain_name: example.com
+        safe_mode_password: Adm1nPa$$
+        install_dns: yes
+        state: domain
+      register: domain_result
+
+    - name: Reboot if domain creation requires it
+      win_reboot:
+      when: domain_result.reboot_required
+
+    - name: Create 3 new users in the domain
+      win_domain_user:
+        name: "{{ item }}"
+        password: UserP@ssw0rd
+        state: present
+      loop:
+        - user1
+        - user2
+        - user3
+
+

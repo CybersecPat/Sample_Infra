@@ -1,0 +1,84 @@
+#This ansible playbook sets up an Ubuntu server as a honeypot. 
+
+---
+- name: Setup Ubuntu host with Docker, Docker-Compose and Cowrie
+  hosts: ubuntu_host
+  become: yes
+  tasks:
+
+    # Install Docker
+    - name: Ensure Docker is installed
+      apt:
+        name: docker.io
+        state: present
+      register: docker_installed
+
+    # Install Docker-Compose
+    - name: Ensure Docker-Compose is installed
+      apt:
+        name: docker-compose
+        state: present
+      register: docker_compose_installed
+
+    # Start and enable Docker service
+    - name: Ensure Docker service is running and enabled
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      when: docker_installed.changed or docker_compose_installed.changed
+
+    # Deploy Cowrie in a Docker container
+    - name: Run Cowrie container
+      docker_container:
+        name: cowrie
+        image: cowrie/cowrie
+        state: started
+        restart_policy: always
+        ports:
+          - "2222:2222"
+
+    # Change the default SSH port on the host to 2222
+    - name: Change SSH port to 2222
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?Port'
+        line: 'Port 2222'
+      notify: Restart SSH
+
+    # Wait for SSH to restart on the new port
+    - name: Wait for SSH to restart
+      meta: flush_handlers
+
+    # Re-establish connection over the new port
+    - name: Wait for SSH on port 2222
+      wait_for:
+        port: 2222
+        delay: 10
+        timeout: 60
+
+    # Configure Cowrie to listen on port 22 of the host
+    - name: Stop Cowrie container
+      docker_container:
+        name: cowrie
+        state: stopped
+
+    - name: Remove Cowrie container
+      docker_container:
+        name: cowrie
+        state: absent
+
+    - name: Run Cowrie container on port 22
+      docker_container:
+        name: cowrie
+        image: cowrie/cowrie
+        state: started
+        restart_policy: always
+        ports:
+          - "22:2222"
+
+  handlers:
+    - name: Restart SSH
+      service:
+        name: ssh
+        state: restarted
